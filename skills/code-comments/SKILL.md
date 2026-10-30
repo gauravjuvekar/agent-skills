@@ -1,0 +1,136 @@
+---
+name: code-comments
+description: "Write code comments that explain why, never what, and strip comment noise from existing code: comment constraints, invariants, workarounds, and rejected alternatives; delete narration, section banners, and restated names; match the codebase's comment density. Use whenever writing a code comment, writing code that may need comments, editing code that has them, writing docstrings or API docs, or asked to clean up, reduce, or improve comments. Pairs with naming (the fix for a comment explaining a bad name is a better name) and writing-docs (the same what-versus-why judgment in docs)."
+---
+
+# Code comments
+
+Code is the behaviour. A comment that restates it says nothing and rots: the
+code gets edited, the comment doesn't, and now the file lies. The only
+comments worth writing carry what the code cannot: the reason, the
+constraint, the history. Agents fail in both directions at once, narrating
+every step ("// increment the counter") while leaving the actual trap (the
+API that returns milliseconds where everything else uses seconds)
+undocumented. Default to zero comments, then add back only the ones below.
+
+## When a comment is warranted
+
+- A non-obvious constraint or invariant: "callers hold the lock", "must stay
+  in sync with the enum in proto/status.proto", "list is sorted, bisect
+  depends on it".
+- A workaround, with a link to what it works around: the upstream bug, the
+  broken client version, the platform quirk. Without the link, the next
+  reader can't tell when it's safe to remove.
+- Why an obvious-looking alternative was rejected: "regex here backtracks
+  catastrophically on real inputs, hence the hand-rolled parser". This is the
+  comment that stops the next person from "simplifying" the code back into
+  the bug.
+- Units, formats, or ranges the type system can't express: "timeout in
+  milliseconds", "amount in cents", "0.0 to 1.0 inclusive".
+- Why risky code is safe: for `unsafe` blocks, lock-free code, and
+  security-sensitive paths, state the invariant the safety rests on and who
+  maintains it: "SAFETY: ptr was allocated by this Vec and len <= capacity".
+  Rust's standard library requires these; the discipline transfers to any
+  language where one wrong assumption corrupts memory or leaks data.
+
+## Refactor before you comment
+
+If none of the above apply and the code still seems to need a comment to be
+understood, the fix is code, not prose: a better name, an extracted
+function, a stronger type, an assertion. A comment explaining confusing code
+patches the symptom and starts rotting immediately; the rename fixes the
+cause and can't drift.
+
+```go
+var d int // days since last refresh
+```
+
+```go
+var daysSinceLastRefresh int
+```
+
+The exception is a call site you can't restructure. An argument whose
+meaning is invisible at the call is best fixed with keyword arguments or an
+options struct, but when the signature isn't yours to change,
+
+```go
+render(label, true /* primary */, false /* disabled */)
+```
+
+beats a bare `render(label, true, false)` and beats a comment on the line
+above, because it can't drift away from the argument it labels.
+
+## What is noise
+
+- Narrating the next line: `// increment the counter` above `counter += 1`.
+- Section banners: `// ---- helpers ----`, `// Validation section`.
+- Restating a name: `// UserService handles users` on `class UserService`.
+- Comments addressed to the reviewer instead of the next reader: "fixed the
+  bug here", "per feedback", "new function to handle retries", "changed from
+  the old approach". These describe the diff, not the code; they are stale
+  the moment the PR merges. If the change history matters, it belongs in the
+  commit message.
+- Comments explaining why your change is correct. Same problem: that is an
+  argument to the reviewer, and it is noise to everyone after.
+
+## Bad, then good
+
+```python
+# Loop through the retries and try the request
+for attempt in range(5):  # 5 retries
+    resp = fetch(url)
+    if resp.ok:
+        break
+    time.sleep(2 ** attempt)  # exponential backoff
+```
+
+```python
+# Upstream rate-limits bursts; 5 tries with backoff covers their
+# longest observed throttle window (issue #482).
+for attempt in range(5):
+    resp = fetch(url)
+    if resp.ok:
+        break
+    time.sleep(2 ** attempt)
+```
+
+Three noise comments deleted, one constraint added. The good version has
+fewer comments and more information.
+
+## Docstrings and API docs
+
+A docstring is a contract, not narration: what the function promises
+(arguments, return value, errors raised, side effects, thread-safety), never
+how the body works. "Uses a dict internally" is implementation detail that
+breaks the doc when the implementation changes. Follow the codebase's
+existing convention for which symbols get docstrings; a private helper whose
+name says everything doesn't need one just because a linter can count.
+
+## Match the codebase
+
+Comment density and idiom are house style like anything else. In a sparsely
+commented codebase, a fully narrated function is as out of place as a
+reformatted file. Match what surrounds your change: density, tone, doc
+comment format, tag conventions (`TODO(name):`, `FIXME:`, `# NOTE:`).
+
+## TODOs
+
+A TODO with no owner and no issue link is a wish. Write `TODO(alice): ...`
+or `TODO(#482): ...` so it can be chased, or file the issue and skip the
+comment. Never leave a TODO describing work the user asked you to finish
+now.
+
+## Editing existing code
+
+- Remove noise comments in code you are already touching; leave the rest of
+  the file alone. Comment cleanup across untouched code is its own change.
+- Some comments are read by tools, not people: linter and formatter
+  directives (`# noqa`, `eslint-disable-next-line`), coverage pragmas,
+  process tags like ADR references. They say nothing to a reader and are
+  still load-bearing; leave them unless you mean to change what they
+  control.
+- Update any comment your edit makes wrong. A stale comment is worse than
+  none.
+- Never delete a comment stating a constraint you don't understand. It may
+  be the only record of why the code survives production. If it looks wrong,
+  say so to the user instead of removing it.
